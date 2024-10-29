@@ -567,22 +567,23 @@ namespace Simvars
 
         struct DataEntry
         {
-            public double bank;
-            public double hdg;
-            public double pitch;
-            public double alt;
-            public double vs;
             public double ias;
+            public double alt;
+            public double hdg;
+            public double dias;
+            public double dalt;
+            public double dhdg;
+            public double bank;
+            public double pitch;
             public double aileronPos;
             public double elevatorPos;
             public double rudderPos;
             public double throttlePos;
+
             public double dbank;
-            public double dhdg;
             public double dpitch;
-            public double dalt;
+            public double vs;
             public double dvs;
-            public double dias;
         };
         List<DataEntry> Data;
 
@@ -594,7 +595,7 @@ namespace Simvars
             {
                 dynamic sys = Py.Import("sys");
                 sys.path.append(@"C:\repos\MLAutopilot\scripts");
-                dynamic pyModule = Py.Import("testpy"); // 'my_script' is the name of the .py file (without extension)
+                dynamic pyModule = Py.Import("predictor"); 
             }
             SimVars = new Dictionary<SimVarsEnum, SimvarRequest>();
             Data = new List<DataEntry>();
@@ -715,7 +716,7 @@ namespace Simvars
                         {
                             dynamic sys = Py.Import("sys");
                             sys.path.append(@"C:\repos\MLAutopilot\scripts");
-                            dynamic pyModule = Py.Import("testpy"); // 'my_script' is the name of the .py file (without extension)
+                            dynamic pyModule = Py.Import("predictor"); 
                             dynamic newAileron = pyModule.predict(hdg, dhdg, bank); // Call the Python function
                             m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newAileron);
                         }
