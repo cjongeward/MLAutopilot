@@ -708,17 +708,24 @@ namespace Simvars
                         break;
 
                     case ModeEnum.flying:
-                        double bank = SimVars[SimVarsEnum.bank].dValue;
+                        double ias = SimVars[SimVarsEnum.airspeed].dValue;
+                        double alt = SimVars[SimVarsEnum.altitude].dValue;
                         double hdg = SimVars[SimVarsEnum.heading].dValue;
+                        double pitch = SimVars[SimVarsEnum.pitch].dValue;
+                        double bank = SimVars[SimVarsEnum.bank].dValue;
                         double dhdg = 0.0;
+                        double dalt = 0.0;
                         double.TryParse(m_sDHdg, NumberStyles.Any, null, out dhdg);
+                        double.TryParse(m_sDAlt, NumberStyles.Any, null, out dalt);
                         using (Py.GIL()) // Acquires the Global Interpreter Lock
                         {
                             dynamic sys = Py.Import("sys");
                             sys.path.append(@"C:\repos\MLAutopilot\scripts");
                             dynamic pyModule = Py.Import("predictor"); 
-                            dynamic newAileron = pyModule.predict(hdg, dhdg, bank); // Call the Python function
-                            m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newAileron);
+                            //dynamic newControls = pyModule.predict(hdg, dhdg, bank); // Call the Python function
+                            dynamic newControls = pyModule.predictHdgAlt(ias, alt, hdg, dalt, dhdg, bank, pitch); // Call the Python function
+                            m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newControls[0]);
+                            m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.elevator_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newControls[1]);
                         }
 
                         //m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, newAileron);
