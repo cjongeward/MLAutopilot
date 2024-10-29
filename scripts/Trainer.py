@@ -18,18 +18,18 @@ class CSVDataset(Dataset):
 
     def __getitem__(self, idx):
         # Separate the input and output
-        X = torch.tensor(self.data.iloc[idx, [0,1]], dtype=torch.float32)
-        y = torch.tensor(self.data.iloc[idx, 2], dtype=torch.float32)
+        X = torch.tensor(self.data.iloc[idx, [2,5,6]], dtype=torch.float32)
+        y = torch.tensor(self.data.iloc[idx, 8], dtype=torch.float32)
         return X, y
 
 # Load the dataset and create a DataLoader
 cwd = os.getcwd()
-dataset = CSVDataset(os.path.join(cwd, "..", "data", "data.csv"))
-train_ratio = 0.9
+dataset = CSVDataset(os.path.join(cwd, "..", "data", "hdgHoldData.csv"))
+train_ratio = 0.95
 train_size = int(len(dataset) * train_ratio)
 test_size = len(dataset) - train_size
 train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
 
 device = (
@@ -44,7 +44,7 @@ print(f"device: {device}")
 class SimpleNN(nn.Module):
     def __init__(self):
         super(SimpleNN, self).__init__()
-        layer1 = nn.Linear(2, 64)  # Input to hidden layer
+        layer1 = nn.Linear(3, 64)  # Input to hidden layer
         layer2 = nn.Linear(64, 64)  # Hidden layer to output
         layer3 = nn.Linear(64, 64)  # Hidden layer to output
         layer4 = nn.Linear(64 ,1)  # Hidden layer to output
@@ -80,9 +80,10 @@ model.train()
 for epoch in range(num_epochs):
     for inputs, targets in train_dataloader:
         # Reshape inputs to match model expectations
-        inputs = inputs.view(-1, 2)# / 180.0
+        inputs = inputs.view(-1, 3)# / 180.0
         inputs[:,0] = inputs[:,0] / 180.0
         inputs[:,1] = inputs[:,1] / 180.0
+        inputs[:,2] = inputs[:,2] / 180.0
         targets = targets.view(-1, 1)
 
         # Forward pass
@@ -104,9 +105,10 @@ model.eval()
 with torch.no_grad():
     avg_loss = 0.0
     for inputs, targets in train_dataloader:
-        inputs = inputs.view(-1, 2)
+        inputs = inputs.view(-1, 3)
         inputs[:,0] = inputs[:,0] / 180.0
         inputs[:,1] = inputs[:,1] / 180.0
+        inputs[:,2] = inputs[:,2] / 180.0
         targets = targets.view(-1, 1)
         pred = model(inputs)
         losses = abs(targets - pred)
@@ -122,9 +124,10 @@ plotme = True
 with torch.no_grad():
     avg_loss = 0.0
     for inputs, targets in test_dataloader:
-        inputs = inputs.view(-1, 2)
+        inputs = inputs.view(-1, 3)
         inputs[:,0] = inputs[:,0] / 180.0
         inputs[:,1] = inputs[:,1] / 180.0
+        inputs[:,2] = inputs[:,2] / 180.0
         targets = targets.view(-1, 1)
         pred = model(inputs)
         losses = abs(targets - pred)
@@ -151,15 +154,17 @@ with torch.no_grad():
 with torch.no_grad():
     avg_loss = 0.0
     test_inputs = torch.tensor([[0.0, 90.], [0.0, 0.0], [0.0, -90.0], [30.0, 90.0], [-30.0, 90.0]])
-    for inputs in test_inputs:
-        inputs = inputs.view(-1, 2)
-        inputs[:,0] = inputs[:,0] / 180.0
-        inputs[:,1] = inputs[:,1] / 180.0
-        pred = model(inputs)
-        print(f"pred: {pred[0]}, bank: {inputs[0,0]}, hdg: {inputs[0,1]}")
+    #for inputs in test_inputs:
+        #inputs = inputs.view(-1, 3)
+        #inputs[:,0] = inputs[:,0] / 180.0
+        #inputs[:,1] = inputs[:,1] / 180.0
+        #inputs[:,1] = inputs[:,2] / 180.0
+        #pred = model(inputs)
+        #print(f"pred: {pred[0]}, bank: {inputs[0,0]}, hdg: {inputs[0,1]}")
 
 
 
-torch.save(model.state_dict(), 'simple_nn_model.pth')
+modelPath = os.path.join(cwd, "..", "models", "hdgHoldModel.pth")
+torch.save(model.state_dict(), modelPath)
 
 

@@ -81,35 +81,6 @@ namespace Simvars
                 }
             }
         }
-
-        private bool isSliderDrag = false;
-        private void updateSliderValue(object sender)
-        {
-            if (sender is Slider oSlider && this.DataContext is SimvarsViewModel oContext)
-            {
-                oContext.SetTickSliderValue((int)oSlider.Value);
-            }
-        }
-
-        private void Slider_DragCompleted(object sender, DragCompletedEventArgs e)
-        {
-            this.updateSliderValue(sender);
-            this.isSliderDrag = false;
-        }
-
-        private void Slider_DragStarted(object sender, DragStartedEventArgs e)
-        {
-            this.isSliderDrag = true;
-        }
-
-        private void Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            if (!this.isSliderDrag)
-            {
-                this.updateSliderValue(sender);
-            }
-        }
-
         private void TextBox_SearchBar_SelectionChanged(object sender, RoutedEventArgs e)
         {
             if (this.DataContext is SimvarsViewModel oContext)
