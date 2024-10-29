@@ -155,12 +155,6 @@ namespace Simvars
             private set { this.SetProperty(ref m_sCollectingModeButtonLabel, value); }
         }
         private string m_sCollectingModeButtonLabel = "Collecting off";
-        public string sTrainingModeButtonLabel
-        {
-            get { return m_sTrainingModeButtonLabel; }
-            private set { this.SetProperty(ref m_sTrainingModeButtonLabel, value); }
-        }
-        private string m_sTrainingModeButtonLabel = "Training off";
         public string sFlyingModeButtonLabel
         {
             get { return m_sFlyingModeButtonLabel; }
@@ -270,6 +264,24 @@ namespace Simvars
             set { this.SetProperty(ref m_sSetValue, value); }
         }
         private string m_sSetValue = null;
+        public string sDHdg
+        {
+            get { return m_sDHdg; }
+            set { this.SetProperty(ref m_sDHdg, value); }
+        }
+        private string m_sDHdg = null;
+        public string sDAlt
+        {
+            get { return m_sDAlt; }
+            set { this.SetProperty(ref m_sDAlt, value); }
+        }
+        private string m_sDAlt = null;
+        public string sDIas
+        {
+            get { return m_sDIas; }
+            set { this.SetProperty(ref m_sDIas, value); }
+        }
+        private string m_sDIas = null;
 
         public ObservableCollection<SimvarRequest> lSimvarRequests { get; private set; }
         public SimvarRequest oSelectedSimvarRequest
@@ -340,7 +352,6 @@ namespace Simvars
 
         public BaseCommand cmdToggleConnect { get; private set; }
         public BaseCommand cmdToggleCollectingMode { get; private set; }
-        public BaseCommand cmdToggleTrainingMode { get; private set; }
         public BaseCommand cmdToggleFlyingMode { get; private set; }
         public BaseCommand cmdSaveData { get; private set; }
         public BaseCommand cmdClearData { get; private set; }
@@ -374,7 +385,6 @@ namespace Simvars
 
             cmdToggleConnect = new BaseCommand((p) => { ToggleConnect(); });
             cmdToggleCollectingMode = new BaseCommand((p) => { toggleCollectingMode(); });
-            cmdToggleTrainingMode = new BaseCommand((p) => { toggleTrainingMode(); });
             cmdToggleFlyingMode = new BaseCommand((p) => { toggleFlyingMode(); });
             cmdSaveData = new BaseCommand((p) => { SaveData(); });
             cmdClearData = new BaseCommand((p) => { ClearData(); });
@@ -389,7 +399,7 @@ namespace Simvars
             cmdSaveFile = new BaseCommand((p) => { SaveFile(false, false); });
             cmdSaveFileWithValues = new BaseCommand((p) => { SaveFile(false, true); });
 
-            m_oTimer.Interval = new TimeSpan(0, 0, 0, 1, 0);
+            m_oTimer.Interval = new TimeSpan(0, 0, 0, 0, 50);
             m_oTimer.Tick += new EventHandler(OnTick);
         }
 
@@ -496,41 +506,33 @@ namespace Simvars
         {
             bank,
             heading,
-            bearing,
-            aileron_pos
+            pitch,
+            altitude,
+            vs,
+            airspeed,
+            aileron_pos,
+            elevator_pos,
+            rudder_pos,
+            throttle_pos
         };
         Dictionary<SimVarsEnum, SimvarRequest> SimVars;
-        Dictionary<SimVarsEnum, double> PrevSimVars;
 
         enum ModeEnum
         {
             off,
             collecting,
-            training,
             flying
         };
         ModeEnum Mode;
 
-        enum TrainingModeEnum
-        {
-            off,
-            training_started,
-            training_active,
-            training_finished
-        }
-        TrainingModeEnum TrainingMode;
         private void setModeStatusText()
         {
             sCollectingModeButtonLabel = "Collecting off";
-            sTrainingModeButtonLabel = "Training off";
             sFlyingModeButtonLabel = "Flying off";
             switch(Mode)
             {
                 case ModeEnum.collecting:
                     sCollectingModeButtonLabel = "Collecting on";
-                    break;
-                case ModeEnum.training:
-                    sTrainingModeButtonLabel = "Training on";
                     break;
                 case ModeEnum.flying:
                     sFlyingModeButtonLabel = "Flying on";
@@ -543,18 +545,6 @@ namespace Simvars
             if(Mode == ModeEnum.off)
             {
                 Mode = ModeEnum.collecting;
-            }
-            else
-            {
-                Mode = ModeEnum.off;
-            }
-            setModeStatusText();
-        }
-        private void toggleTrainingMode()
-        {
-            if(Mode == ModeEnum.off)
-            {
-                Mode = ModeEnum.training;
             }
             else
             {
@@ -579,7 +569,20 @@ namespace Simvars
         {
             public double bank;
             public double hdg;
+            public double pitch;
+            public double alt;
+            public double vs;
+            public double ias;
             public double aileronPos;
+            public double elevatorPos;
+            public double rudderPos;
+            public double throttlePos;
+            public double dbank;
+            public double dhdg;
+            public double dpitch;
+            public double dalt;
+            public double dvs;
+            public double dias;
         };
         List<DataEntry> Data;
 
@@ -590,14 +593,10 @@ namespace Simvars
             using (Py.GIL()) // Acquires the Global Interpreter Lock
             {
                 dynamic sys = Py.Import("sys");
-                sys.path.append(@"C:\MSFS SDK\Samples\VisualStudio\SimvarWatcher");
-                dynamic torch = Py.Import("sys");
+                sys.path.append(@"C:\repos\MLAutopilot\scripts");
                 dynamic pyModule = Py.Import("testpy"); // 'my_script' is the name of the .py file (without extension)
-                //dynamic result = pyModule.add(5, 3); // Call the Python function
-                //Console.WriteLine($"Result from Python: {result}");
             }
             SimVars = new Dictionary<SimVarsEnum, SimvarRequest>();
-            PrevSimVars = new Dictionary<SimVarsEnum, double>();
             Data = new List<DataEntry>();
             foreach (SimvarRequest oSimvarRequest in lSimvarRequests)
             {
@@ -606,28 +605,51 @@ namespace Simvars
                     case "HEADING INDICATOR":
                         SimVars.Add(SimVarsEnum.heading, oSimvarRequest);
                         break;
-                    case "AUTOPILOT HEADING LOCK DIR":
-                        SimVars.Add(SimVarsEnum.bearing, oSimvarRequest);
+                    case "INDICATED ALTITUDE":
+                        SimVars.Add(SimVarsEnum.altitude, oSimvarRequest);
+                        break;
+                    case "AIRSPEED INDICATED":
+                        SimVars.Add(SimVarsEnum.airspeed, oSimvarRequest);
+                        break;
+                    case "VERTICAL SPEED":
+                        SimVars.Add(SimVarsEnum.vs, oSimvarRequest);
                         break;
                     case "AILERON POSITION":
                         SimVars.Add(SimVarsEnum.aileron_pos, oSimvarRequest);
                         break;
+                    case "ELEVATOR POSITION":
+                        SimVars.Add(SimVarsEnum.elevator_pos, oSimvarRequest);
+                        break;
+                    case "RUDDER POSITION":
+                        SimVars.Add(SimVarsEnum.rudder_pos, oSimvarRequest);
+                        break;
+                    case "GENERAL ENG THROTTLE LEVER POSITION:1":
+                        SimVars.Add(SimVarsEnum.throttle_pos, oSimvarRequest);
+                        break;
                     case "ATTITUDE INDICATOR BANK DEGREES":
                         SimVars.Add(SimVarsEnum.bank, oSimvarRequest);
-                        PrevSimVars.Add(SimVarsEnum.bank, 0.0);
+                        break;
+                    case "ATTITUDE INDICATOR PITCH DEGREES":
+                        SimVars.Add(SimVarsEnum.pitch, oSimvarRequest);
                         break;
                 }
             }
             Mode = ModeEnum.off;
-            TrainingMode = TrainingModeEnum.off;
         }
 
         private bool isValid()
         {
-            return SimVars != null && SimVars.ContainsKey(SimVarsEnum.bank) &&
+            return SimVars != null &&
+                SimVars.ContainsKey(SimVarsEnum.aileron_pos) &&
+                SimVars.ContainsKey(SimVarsEnum.airspeed) &&
+                SimVars.ContainsKey(SimVarsEnum.altitude) &&
+                SimVars.ContainsKey(SimVarsEnum.bank) &&
+                SimVars.ContainsKey(SimVarsEnum.elevator_pos) &&
                 SimVars.ContainsKey(SimVarsEnum.heading) &&
-                SimVars.ContainsKey(SimVarsEnum.bearing) &&
-                SimVars.ContainsKey(SimVarsEnum.aileron_pos);
+                SimVars.ContainsKey(SimVarsEnum.pitch) &&
+                SimVars.ContainsKey(SimVarsEnum.rudder_pos) &&
+                SimVars.ContainsKey(SimVarsEnum.throttle_pos) &&
+                SimVars.ContainsKey(SimVarsEnum.vs);
         }
 
         private void OnTick(object sender, EventArgs e)
@@ -654,74 +676,56 @@ namespace Simvars
                 {
                     case ModeEnum.collecting:
                         DataEntry entry = new DataEntry();
-                        entry.bank = SimVars[SimVarsEnum.bank].dValue;
-                        entry.hdg = SimVars[SimVarsEnum.heading].dValue;
                         entry.aileronPos = SimVars[SimVarsEnum.aileron_pos].dValue;
+                        entry.alt = SimVars[SimVarsEnum.altitude].dValue;
+                        entry.bank = SimVars[SimVarsEnum.bank].dValue;
+                        entry.elevatorPos = SimVars[SimVarsEnum.elevator_pos].dValue;
+                        entry.hdg = SimVars[SimVarsEnum.heading].dValue;
+                        entry.ias = SimVars[SimVarsEnum.airspeed].dValue;
+                        entry.pitch = SimVars[SimVarsEnum.pitch].dValue;
+                        entry.rudderPos = SimVars[SimVarsEnum.rudder_pos].dValue;
+                        entry.throttlePos = SimVars[SimVarsEnum.throttle_pos].dValue;
+                        entry.vs = SimVars[SimVarsEnum.vs].dValue;
+
+                        double dValue = 0.0;
+                        if (m_sDHdg != null && double.TryParse(m_sDHdg, NumberStyles.Any, null, out dValue))
+                        {
+                            entry.dhdg = dValue;
+                        }
+                        if (m_sDAlt != null && double.TryParse(m_sDAlt, NumberStyles.Any, null, out dValue))
+                        {
+                            entry.dalt = 0.0;
+                        }
+                        if (m_sDIas != null && double.TryParse(m_sDIas, NumberStyles.Any, null, out dValue))
+                        {
+                            entry.dias = 0.0;
+                        }
+                        entry.dbank = 0.0;
+                        entry.dpitch = 0.0;
+                        entry.dvs = 0.0;
                         Data.Add(entry);
                         break;
-                    case ModeEnum.training:
-                        if(TrainingMode == TrainingModeEnum.off)
-                        {
-                            TrainingMode = TrainingModeEnum.training_started;
-                            train();
-                        }
-                        break;
+
                     case ModeEnum.flying:
                         double bank = SimVars[SimVarsEnum.bank].dValue;
                         double hdg = SimVars[SimVarsEnum.heading].dValue;
-                        //double targetBank = 15.0;
-                        //double bankDiff = bank - targetBank; 
-                        //double curAileron = SimVars[SimVarsEnum.aileron_pos].dValue;
-                        //double newAileron = 100.0 * bankDiff; 
+                        double dhdg = 0.0;
+                        double.TryParse(m_sDHdg, NumberStyles.Any, null, out dhdg);
                         using (Py.GIL()) // Acquires the Global Interpreter Lock
                         {
                             dynamic sys = Py.Import("sys");
-                            sys.path.append(@"C:\MSFS SDK\Samples\VisualStudio\SimvarWatcher");
+                            sys.path.append(@"C:\repos\MLAutopilot\scripts");
                             dynamic pyModule = Py.Import("testpy"); // 'my_script' is the name of the .py file (without extension)
-                            dynamic newAileron = pyModule.predict(bank, hdg); // Call the Python function
+                            dynamic newAileron = pyModule.predict(hdg, dhdg, bank); // Call the Python function
                             m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newAileron);
                         }
 
                         //m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, newAileron);
                         break;
                 }
-                //double headingDiff = heading.dValue - bearing.dValue; 
-                //double targetBank = headingDiff * 0.5; 
-                //double bankDiff = bank.dValue - targetBank; 
-                //double curAileron = aileron.dValue;
-                //double newAileron = curAileron + 10.0 * bankDiff; 
-                //m_oSimConnect.SetDataOnSimObject(aileron.eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, newAileron);
-
             }
         }
 
-        List<double> w = new List<double>();
-        List<double> c = new List<double>();
-        List<double> x = new List<double>();
-        List<double> x2 = new List<double>();
-        List<double> y = new List<double>();
-        List<double> ycalc = new List<double>();
-        private void train()
-        {
-            w = new List<double>();
-            w.Add(1.0);
-            w.Add(1.0);
-            w.Add(1.0);
-            c = new List<double>();
-            x = new List<double>();
-            x2 = new List<double>();
-            y = new List<double>();
-            ycalc = new List<double>();
-            foreach (DataEntry entry in Data)
-            {
-                c.Add(1);
-                x.Add(entry.bank);
-                x2.Add(entry.bank * entry.bank);
-                ycalc.Add(w[0] * 1 + w[1] * entry.bank + w[2] * entry.bank * entry.bank);
-                y.Add(entry.aileronPos);
-            }
-
-        }
         private void SaveData()
         {
             Microsoft.Win32.SaveFileDialog oSaveFileDialog = new Microsoft.Win32.SaveFileDialog();
@@ -732,7 +736,7 @@ namespace Simvars
                 {
                     foreach (DataEntry entry in Data)
                     {
-                        string sFormatedLine = entry.bank + "," + entry.hdg + "," + entry.aileronPos;
+                        string sFormatedLine = entry.ias + "," + entry.alt + "," + entry.hdg + "," +  entry.dias + "," + entry.dalt + "," + entry.dhdg + "," + entry.bank + "," + entry.pitch + "," + entry.aileronPos + "," + entry.elevatorPos + "," + entry.rudderPos + "," + entry.throttlePos;
                         oStreamWriter.WriteLine(sFormatedLine);
                     }
                 }
@@ -958,12 +962,6 @@ namespace Simvars
                     }
                 }
             }
-        }
-
-        public void SetTickSliderValue(int _iValue)
-        {
-            //m_oTimer.Interval = new TimeSpan(0, 0, 0, 0, (int)(_iValue));
-            m_oTimer.Interval = new TimeSpan(0, 0, 0, 0, 50);
         }
     }
 }

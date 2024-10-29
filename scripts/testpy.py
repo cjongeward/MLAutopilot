@@ -5,7 +5,7 @@ import torch.nn as nn
 class SimpleNN(nn.Module):
     def __init__(self):
         super(SimpleNN, self).__init__()
-        layer1 = nn.Linear(2, 64)  # Input to hidden layer
+        layer1 = nn.Linear(3, 64)  # Input to hidden layer
         layer2 = nn.Linear(64, 64)  # Hidden layer to output
         layer3 = nn.Linear(64, 64)  # Hidden layer to output
         layer4 = nn.Linear(64 ,1)  # Hidden layer to output
@@ -29,12 +29,12 @@ class SimpleNN(nn.Module):
 
 # Load the trained model
 model = SimpleNN()
-model.load_state_dict(torch.load('C:/MSFS SDK/Samples/VisualStudio/SimvarWatcher/simple_nn_model.pth'))
+model.load_state_dict(torch.load('C:/repos/MLAutopilot/models/hdgHoldModel.pth'))
 model.eval()  # Set to evaluation mode
 
 # Example input for inference
-def predict(bank, hdg):
-    example_input = torch.tensor([bank, hdg], dtype=torch.float32).view(-1, 2) / 180.0
+def predict(hdg, dhdg, bank):
+    example_input = torch.tensor([hdg, dhdg, bank], dtype=torch.float32).view(-1, 3) / 180.0
     with torch.no_grad():
         predicted_output = model(example_input)
     return predicted_output[0].item()
