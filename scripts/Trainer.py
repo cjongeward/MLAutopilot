@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import os
 
 from HdgHoldModel import HdgHoldNN
+from HdgAltHoldModel import HdgAltHoldNN
 
 
 # Define a Dataset class
@@ -61,7 +62,7 @@ device = (
 )
 print(f"device: {device}")
 
-model = HdgHoldNN()
+model = HdgAltHoldNN()
 model.load_datasets()
 trainModel(model=model, dataset=model.train_dataset)
 evaluateModel(model=model, dataset=model.train_dataset, datasetName="Training")
