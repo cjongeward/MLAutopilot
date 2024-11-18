@@ -11,6 +11,9 @@ using System.Collections.Generic;
 using System.Collections;
 
 using Python.Runtime;
+using WebSocketSharp;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Simvars
 {
@@ -82,6 +85,9 @@ namespace Simvars
 
         /// User-defined win32 event
         public const int WM_USER_SIMCONNECT = 0x0402;
+        private const string obsAddress = "ws://127.0.0.1:4455"; // WebSocket server address
+        private const string obsPassword = "blahblah"; // Set password if configured in OBS
+        private WebSocket ws;
 
         /// Window handle
         private IntPtr m_hWnd = new IntPtr(0);
@@ -510,12 +516,16 @@ namespace Simvars
             altitude,
             vs,
             airspeed,
+            loc,
+            gs,
             aileron_pos,
             elevator_pos,
             rudder_pos,
-            throttle_pos
+            throttle_pos,
+            elevator_trim_pos
         };
         Dictionary<SimVarsEnum, SimvarRequest> SimVars;
+        int DataFrameCounter = 0;
 
         enum ModeEnum
         {
@@ -545,9 +555,37 @@ namespace Simvars
             if(Mode == ModeEnum.off)
             {
                 Mode = ModeEnum.collecting;
+                if(isOBSConnected())
+                {
+                    var startRecording = new
+                    {
+                        op = 6,
+                        d = new
+                        {
+                            requestType = "StartRecord",
+                            requestId = Guid.NewGuid().ToString()
+                        }
+                    };
+                    ws.Send(JsonConvert.SerializeObject(startRecording));
+                    Console.WriteLine("Recording started");
+                }
             }
             else
             {
+                if(isOBSConnected())
+                {
+                    var stopRecording = new
+                    {
+                        op = 6,
+                        d = new
+                        {
+                            requestType = "StopRecord",
+                            requestId = Guid.NewGuid().ToString()
+                        }
+                    };
+                    ws.Send(JsonConvert.SerializeObject(stopRecording));
+                    Console.WriteLine("Recording stopped");
+                }
                 Mode = ModeEnum.off;
             }
             setModeStatusText();
@@ -575,15 +613,20 @@ namespace Simvars
             public double dhdg;
             public double bank;
             public double pitch;
+            public double loc;
+            public double gs;
             public double aileronPos;
             public double elevatorPos;
             public double rudderPos;
             public double throttlePos;
+            public double elevatorTrimPos;
 
             public double dbank;
             public double dpitch;
             public double vs;
             public double dvs;
+
+            public int timestampMS;
         };
         List<DataEntry> Data;
 
@@ -595,13 +638,13 @@ namespace Simvars
             {
                 dynamic sys = Py.Import("sys");
                 sys.path.append(@"C:\repos\MLAutopilot\scripts");
-                dynamic pyModule = Py.Import("predictor"); 
+                //dynamic pyModule = Py.Import("predictor"); 
             }
             SimVars = new Dictionary<SimVarsEnum, SimvarRequest>();
             Data = new List<DataEntry>();
             foreach (SimvarRequest oSimvarRequest in lSimvarRequests)
             {
-                switch(oSimvarRequest.sName)
+                switch (oSimvarRequest.sName)
                 {
                     case "HEADING INDICATOR":
                         SimVars.Add(SimVarsEnum.heading, oSimvarRequest);
@@ -615,11 +658,20 @@ namespace Simvars
                     case "VERTICAL SPEED":
                         SimVars.Add(SimVarsEnum.vs, oSimvarRequest);
                         break;
+                    case "HSI GSI NEEDLE":
+                        SimVars.Add(SimVarsEnum.gs, oSimvarRequest);
+                        break;
+                    case "HSI CDI NEEDLE":
+                        SimVars.Add(SimVarsEnum.loc, oSimvarRequest);
+                        break;
                     case "AILERON POSITION":
                         SimVars.Add(SimVarsEnum.aileron_pos, oSimvarRequest);
                         break;
                     case "ELEVATOR POSITION":
                         SimVars.Add(SimVarsEnum.elevator_pos, oSimvarRequest);
+                        break;
+                    case "ELEVATOR TRIM POSITION":
+                        SimVars.Add(SimVarsEnum.elevator_trim_pos, oSimvarRequest);
                         break;
                     case "RUDDER POSITION":
                         SimVars.Add(SimVarsEnum.rudder_pos, oSimvarRequest);
@@ -636,6 +688,52 @@ namespace Simvars
                 }
             }
             Mode = ModeEnum.off;
+
+            //obs setup for recording
+            ws = new WebSocket(obsAddress);
+            ws.OnClose += (sender, e) =>
+            {
+                Console.WriteLine($"WebSocket closed. Reason: {e.Reason}, WasClean: {e.WasClean}");
+            };
+
+            ws.OnError += (sender, e) =>
+            {
+                Console.WriteLine($"WebSocket error: {e.Message}");
+            };
+
+            ws.OnMessage += (sender, e) =>
+            {
+                Console.WriteLine($"Received {e.Data}");
+                var json = JObject.Parse(e.Data);
+                if ((int)json["op"] == 0)
+                {
+                    Console.WriteLine("Received Hello message from OBS.");
+                    var iidentifyMessage = new
+                    {
+                        op = 1,
+                        d = new
+                        {
+                            rpcVersion = 1
+                        }
+                    };
+                    ws.Send(JsonConvert.SerializeObject(iidentifyMessage));
+                }
+
+                if ((int)json["op"] == 7 && (json["d"]["responseData"]?["outputActive"]?.Value<bool>() ?? false))
+                {
+                    var timestamp = json["d"]["responseData"]["outputDuration"].Value<int>();
+                    createDataEntry(timestamp);
+                    Console.WriteLine($"recieved timestamp {timestamp}.");
+                }
+            };
+            ws.Connect();
+            Console.WriteLine("Connected to OBS WebSocket");
+            DataFrameCounter = 0;
+        }
+
+        private bool isOBSConnected()
+        {
+            return ws.ReadyState == WebSocketState.Open;
         }
 
         private bool isValid()
@@ -645,7 +743,10 @@ namespace Simvars
                 SimVars.ContainsKey(SimVarsEnum.airspeed) &&
                 SimVars.ContainsKey(SimVarsEnum.altitude) &&
                 SimVars.ContainsKey(SimVarsEnum.bank) &&
+                SimVars.ContainsKey(SimVarsEnum.gs) &&
+                SimVars.ContainsKey(SimVarsEnum.loc) &&
                 SimVars.ContainsKey(SimVarsEnum.elevator_pos) &&
+                SimVars.ContainsKey(SimVarsEnum.elevator_trim_pos) &&
                 SimVars.ContainsKey(SimVarsEnum.heading) &&
                 SimVars.ContainsKey(SimVarsEnum.pitch) &&
                 SimVars.ContainsKey(SimVarsEnum.rudder_pos) &&
@@ -653,6 +754,46 @@ namespace Simvars
                 SimVars.ContainsKey(SimVarsEnum.vs);
         }
 
+        private void createDataEntry(int timestampMS = 0)
+        {
+            DataEntry entry = new DataEntry();
+            entry.aileronPos = SimVars[SimVarsEnum.aileron_pos].dValue;
+            entry.alt = SimVars[SimVarsEnum.altitude].dValue;
+            entry.bank = SimVars[SimVarsEnum.bank].dValue;
+            entry.elevatorPos = SimVars[SimVarsEnum.elevator_pos].dValue;
+            entry.hdg = SimVars[SimVarsEnum.heading].dValue;
+            entry.ias = SimVars[SimVarsEnum.airspeed].dValue;
+            entry.pitch = SimVars[SimVarsEnum.pitch].dValue;
+            entry.rudderPos = SimVars[SimVarsEnum.rudder_pos].dValue;
+            entry.throttlePos = SimVars[SimVarsEnum.throttle_pos].dValue;
+            entry.vs = SimVars[SimVarsEnum.vs].dValue;
+            entry.loc = SimVars[SimVarsEnum.loc].dValue;
+            entry.gs = SimVars[SimVarsEnum.gs].dValue;
+            entry.elevatorTrimPos = SimVars[SimVarsEnum.elevator_trim_pos].dValue;
+
+            double dValue = 0.0;
+            if (m_sDHdg != null && double.TryParse(m_sDHdg, NumberStyles.Any, null, out dValue))
+            {
+                entry.dhdg = dValue;
+            }
+            if (m_sDAlt != null && double.TryParse(m_sDAlt, NumberStyles.Any, null, out dValue))
+            {
+                entry.dalt = 0.0;
+            }
+            if (m_sDIas != null && double.TryParse(m_sDIas, NumberStyles.Any, null, out dValue))
+            {
+                entry.dias = 0.0;
+            }
+            entry.dbank = 0.0;
+            entry.dpitch = 0.0;
+            entry.dvs = 0.0;
+
+            entry.timestampMS = timestampMS;
+            Data.Add(entry);
+        }
+
+
+        
         private void OnTick(object sender, EventArgs e)
         {
             //Console.WriteLine("OnTick");
@@ -676,35 +817,42 @@ namespace Simvars
                 switch(Mode)
                 {
                     case ModeEnum.collecting:
-                        DataEntry entry = new DataEntry();
-                        entry.aileronPos = SimVars[SimVarsEnum.aileron_pos].dValue;
-                        entry.alt = SimVars[SimVarsEnum.altitude].dValue;
-                        entry.bank = SimVars[SimVarsEnum.bank].dValue;
-                        entry.elevatorPos = SimVars[SimVarsEnum.elevator_pos].dValue;
-                        entry.hdg = SimVars[SimVarsEnum.heading].dValue;
-                        entry.ias = SimVars[SimVarsEnum.airspeed].dValue;
-                        entry.pitch = SimVars[SimVarsEnum.pitch].dValue;
-                        entry.rudderPos = SimVars[SimVarsEnum.rudder_pos].dValue;
-                        entry.throttlePos = SimVars[SimVarsEnum.throttle_pos].dValue;
-                        entry.vs = SimVars[SimVarsEnum.vs].dValue;
+                        if (isOBSConnected())
+                        {
+                            //var updateTextOverlay = new
+                            //{
+                            //    op = 6,
+                            //    d = new
+                            //    {
+                            //        requestId = Guid.NewGuid().ToString(),
+                            //        requestType = "SetInputSettings",
+                            //        requestData = new
+                            //        {
+                            //            inputName = "framecounter",
+                            //            inputSettings = new { text = $"Frame: {DataFrameCounter}" }
+                            //        }
+                            //    }
+                            //};
+                            //ws.Send(JsonConvert.SerializeObject(updateTextOverlay));
+                            //Console.WriteLine($"Frame updated to: {DataFrameCounter}");
 
-                        double dValue = 0.0;
-                        if (m_sDHdg != null && double.TryParse(m_sDHdg, NumberStyles.Any, null, out dValue))
-                        {
-                            entry.dhdg = dValue;
+                            var getRecordStatus = new
+                            {
+                                op = 6,
+                                d = new
+                                {
+                                    requestId = Guid.NewGuid().ToString(),
+                                    requestType = "GetRecordStatus",
+                                }
+                            };
+                            ws.Send(JsonConvert.SerializeObject(getRecordStatus));
+                            DataFrameCounter++;
                         }
-                        if (m_sDAlt != null && double.TryParse(m_sDAlt, NumberStyles.Any, null, out dValue))
+                        else
                         {
-                            entry.dalt = 0.0;
+                            createDataEntry();
                         }
-                        if (m_sDIas != null && double.TryParse(m_sDIas, NumberStyles.Any, null, out dValue))
-                        {
-                            entry.dias = 0.0;
-                        }
-                        entry.dbank = 0.0;
-                        entry.dpitch = 0.0;
-                        entry.dvs = 0.0;
-                        Data.Add(entry);
+
                         break;
 
                     case ModeEnum.flying:
@@ -713,6 +861,8 @@ namespace Simvars
                         double hdg = SimVars[SimVarsEnum.heading].dValue;
                         double pitch = SimVars[SimVarsEnum.pitch].dValue;
                         double bank = SimVars[SimVarsEnum.bank].dValue;
+                        double gs = SimVars[SimVarsEnum.gs].dValue;
+                        double loc = SimVars[SimVarsEnum.loc].dValue;
                         double dhdg = 0.0;
                         double dalt = 0.0;
                         double.TryParse(m_sDHdg, NumberStyles.Any, null, out dhdg);
@@ -723,9 +873,12 @@ namespace Simvars
                             sys.path.append(@"C:\repos\MLAutopilot\scripts");
                             dynamic pyModule = Py.Import("predictor"); 
                             //dynamic newControls = pyModule.predict(hdg, dhdg, bank); // Call the Python function
-                            dynamic newControls = pyModule.predictHdgAlt(ias, alt, hdg, dalt, dhdg, bank, pitch); // Call the Python function
+                            //dynamic newControls = pyModule.predictILS(ias, alt, hdg, bank, pitch, loc, gs); // Call the Python function
+                            dynamic newControls = pyModule.predictRT(hdg, bank, alt); // Call the Python function
                             m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newControls[0]);
                             m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.elevator_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newControls[1]);
+                            //m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.throttle_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newControls[2]);
+                            //m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.elevator_trim_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, (double)newControls[3]);
                         }
 
                         //m_oSimConnect.SetDataOnSimObject(SimVars[SimVarsEnum.aileron_pos].eDef, m_iObjectIdRequest, SIMCONNECT_DATA_SET_FLAG.DEFAULT, newAileron);
@@ -744,7 +897,7 @@ namespace Simvars
                 {
                     foreach (DataEntry entry in Data)
                     {
-                        string sFormatedLine = entry.ias + "," + entry.alt + "," + entry.hdg + "," +  entry.dias + "," + entry.dalt + "," + entry.dhdg + "," + entry.bank + "," + entry.pitch + "," + entry.aileronPos + "," + entry.elevatorPos + "," + entry.rudderPos + "," + entry.throttlePos;
+                        string sFormatedLine = entry.ias + "," + entry.alt + "," + entry.hdg + "," +  entry.dias + "," + entry.dalt + "," + entry.dhdg + "," + entry.bank + "," + entry.pitch + "," + entry.aileronPos + "," + entry.elevatorPos + "," + entry.rudderPos + "," + entry.throttlePos + "," + entry.loc + "," + entry.gs + "," + entry.elevatorTrimPos + "," + entry.timestampMS;
                         oStreamWriter.WriteLine(sFormatedLine);
                     }
                 }
@@ -757,6 +910,7 @@ namespace Simvars
             {
                 Data.Clear();
             }
+            DataFrameCounter = 0;
         }
 
 
